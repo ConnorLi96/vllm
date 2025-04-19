@@ -29,6 +29,10 @@ from starlette.datastructures import State
 from starlette.routing import Mount
 from typing_extensions import assert_never
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import Request
+from starlette.responses import JSONResponse
+
 import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.engine.arg_utils import AsyncEngineArgs
@@ -103,6 +107,25 @@ logger = init_logger('vllm.entrypoints.openai.api_server')
 
 _running_tasks: set[asyncio.Task] = set()
 
+class LimitBodySizeMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, max_body_size: int):
+        super().__init__(app)
+        self.max_body_size = max_body_size
+
+    async def dispatch(self, request: Request, call_next):
+        # Read the request body
+        body = await request.body()
+        body_size = len(body)
+
+        # Log the body size for debugging
+        print(f"Request body size: {body_size} bytes")
+
+        if body_size > self.max_body_size:
+            return JSONResponse({"error": "Request entity too large"}, status_code=413)
+
+        # Recreate the request with the body
+        request = Request(request.scope, receive=lambda: body)
+        return await call_next(request)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -822,7 +845,8 @@ def build_app(args: Namespace) -> FastAPI:
     app.root_path = args.root_path
 
     mount_metrics(app)
-
+    # Add the LimitBodySizeMiddleware
+    app.add_middleware(LimitBodySizeMiddleware, max_body_size=20 * 1024 * 1024)  # 20MB
     app.add_middleware(
         CORSMiddleware,
         allow_origins=args.allowed_origins,

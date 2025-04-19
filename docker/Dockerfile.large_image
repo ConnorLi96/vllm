@@ -1,0 +1,3 @@
+FROM vllm/vllm-openai:v0.8.4
+
+COPY ../vllm/entrypoints/openai/api_server.py /opt/vllm/vllm/openai/entrypoints/api_server.py
